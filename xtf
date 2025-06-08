@@ -1,0 +1,210 @@
+#!/bin/bash
+
+#Nastavenie constant
+export POSIXLY_CORRECT=yes
+export LC_ALL=C
+export LC_NUMERIC=utf8
+
+#Funkcie 
+
+#funkcia rozdeluje podla druhu suboru ci je zkomprimovany alebo nie
+log_divider() {
+    local logfile="$1"
+
+    if [[ $logfile == *.gz ]]; then
+        zcat "$logfile"
+    else
+        cat "$logfile"
+    fi
+}
+#funkcia len vypisuje informacie HELP
+help_info(){
+	echo "------------------------------ HELP -------------------------------"
+	echo "Pouzitie: xtf [-h|--help] [FILTR] [PŘÍKAZ] UŽIVATEL LOG [LOG2 [...]"
+	echo "Volby: "
+	echo "	1. PRIKAZ může být jeden z:"
+	echo "		list 		– výpis záznamů pro daného uživatele."
+	echo "		list-currency 	– výpis seřazeného seznamu vyskytujících se měn."
+	echo "		status 		– výpis skutečného stavu účtu seskupeného a seřazeného dle jednotlivých měn."
+	echo "		profit 		– výpis stavu účtu zákazníka se započítaným fiktivním výnosem."
+	echo "	2. FILTR může být kombinace následujících:"
+	echo "		-a DATETIME 	– after: jsou uvažovány pouze záznamy PO tomto datu a čase (bez něj). DATETIME je formátu YYYY-MM-DD HH:MM:SS."
+	echo "		-b DATETIME 	– before: jsou uvažovány pouze záznamy PŘED tímto datem a časem (bez něj)."
+	echo "		-c CURRENCY 	– jsou uvažovány pouze záznamy odpovídající dané měně."
+}
+
+#Len definovanie premennych
+name=""
+com=""
+curr=""
+dateA=""
+timeA=""
+dateB=""
+timeB=""
+
+#XTF_PROFIT ak nie je definovany nastavy 20
+if [[ -z ${XTF_PROFIT} ]]; then
+    XTF_PROFIT=20
+fi
+
+#Zachytavanie prepinacov pomocou getopts
+while getopts :h::a:b:c: o
+do      case "$o" in
+				#Rozdelenie datumu do stlpcov podla pomlcky a nasledna kontrola formatu
+        a | b)  date=$(echo $OPTARG | awk '{split($1, cast, "-") ; 
+											if (length(cast[1]) == 4 && cast[1] ~ /^[0-9]+$/ && length(cast[2]) == 2 && cast[2] ~ /^[0-9]+$/ && length(cast[3]) == 2 && cast[3] ~ /^[0-9]+$/)
+												print $1
+											else 
+												print "FALSE"
+											}') 
+				#Rozdelenie casu do stlpcov podla dvojbodky a nasledna kontrola formatu
+				time=$(echo $OPTARG | awk '{split($2, cast, ":") ; 
+											if (length(cast[1]) == 2 && cast[1] ~ /^[0-9]+$/ && length(cast[2]) == 2 && cast[2] ~ /^[0-9]+$/ && length(cast[3]) == 2 && cast[3] ~ /^[0-9]+$/)
+												print $2
+											else 
+												print "FALSE"
+											}') 
+				#V pripade zleho formatu su ulozene v time alebo date hodnota FALSE a podmienka ukonci program s hodnotou 1
+				if [[ "$date" = "FALSE" ]] || [[ "$time" = "FALSE" ]]
+				then
+					echo "Wrong formate of date or time(-a)" >&2
+					exit 1
+				fi
+				#Ulozenie casu a datumu do urcenych premennych podla prepinaca (-a/-b)
+				if [[ "$o" = a ]]
+				then
+				#Ak je opetovne zadany prepinac s casom
+					if [[ ! -z "$dateA" ]]
+					then
+						echo "You entered more than one time -a" >&2
+						exit 1
+					fi
+					timeA=$time
+					dateA=$date
+				else
+					if [[ ! -z "$dateB" ]]
+					then
+						echo "You entered more than one time -b" >&2
+						exit 1
+					fi
+					timeB=$time
+					dateB=$date
+				fi
+
+				;;
+        c)      
+				#Kontrola poctu a obsahu nazvov mien 
+				curr=$(echo $OPTARG | awk '{if ((length($0) == 3) && ($0 ~ /^[A-Z]+$/)) print $0}')
+				if [[ -z "$curr" ]]
+				then
+					echo "You have entered wrong currency"
+					exit 1
+				fi
+				;;
+		h)	
+				if [[ -n "$OPTARG" ]] && [[ ! "$OPTARG" =~ ^- ]]
+				then
+					echo "You have entered wrong help help option"
+					exit 1
+				fi
+				help_info
+				exit 0;;
+        *)      echo "Undefined switch = $o" >&2
+                exit 1;;
+        esac
+done
+
+#Posunutie kurzora za prepinace
+OPTIND=$((OPTIND - 1)) 
+shift $OPTIND	
+
+#V pripade nenastavenia datumu a casu pre dany prepinac nastavyme od min po max
+if [[ -z "$dateA" ]]
+then
+	dateA="0000-00-00"
+	timeA="00:00:00"
+fi
+
+if [[ -z "$dateB" ]]
+then
+	dateB="9999-99-99"
+	timeB="99:99:99"
+fi
+
+#Zachytavanie parametrov
+for argument in "$@"; do
+	case "$argument" in
+		#Vypis help
+		help)	
+			help_info
+			exit 0
+			;;	
+		#Zadanie suboru
+		*.*)	
+			#Kontrola ci je zadane meno 
+			if [[ -z "$name" ]]
+			then
+				echo "You have entered line without name"
+				exit 1
+			fi
+			fileName="$argument"
+
+			#Kontrola existencie suboru
+			if [ -f "$fileName" ]; 
+			then
+				#Rozdelenie moznych prikazov
+				case "$com" in
+					#Vypis na stdout podla zadanych prepinacov a ich parametrov
+					"list" | "")
+						log_divider "$fileName" | awk -F ';' '{split($2, cas, " ") ; if (($1 == "'$name'") && ((cas[1] == "'$dateA'" && cas[2] >= "'$timeA'") || cas[1] > "'$dateA'") && ((cas[1] == "'$dateB'" && cas[2] < "'$timeB'") || cas[1] < "'$dateB'")) print $0}' | grep "$curr"
+					;;
+					"list-currency")
+						log_divider "$fileName" | awk -F ';' '{split($2, cas, " ") ; if (($1 == "'$name'") && ((cas[1] == "'$dateA'" && cas[2] >= "'$timeA'") || cas[1] > "'$dateA'") && ((cas[1] == "'$dateB'" && cas[2] < "'$timeB'") || cas[1] < "'$dateB'")) print $3}' | grep "$curr" | sort | uniq
+					;;
+					"status"|"profit")	#Uklada do pola hodnoty prevodov podla meny pre status a nasledne moze byt pouzity pre spracovanie pre prikaz profit
+						log_divider "$fileName" | awk -F ';' 'BEGIN {  } 
+										{
+											split($2, cas, " ") ; 
+											if (($1 == "'$name'") && ((cas[1] == "'$dateA'" && cas[2] >= "'$timeA'") || cas[1] > "'$dateA'") && ((cas[1] == "'$dateB'" && cas[2] < "'$timeB'") || cas[1] < "'$dateB'")) 
+												total[$3] += $4
+										} 
+									END { for (key in total)
+											{	
+												if(("'$com'" == "profit") && (total[key] > 0)) 
+													total[key] += (total[key] * "'$XTF_PROFIT'")/100;
+												printf("%s : %.4f\n", key, total[key])
+											} 
+										}' | sort
+					;;
+				esac
+			else
+				echo "File name:'$fileName' - Do not exist." >&2
+				exit 1
+			fi
+			;;
+		*)	#Uklada do premenej com len mozne varianty prikazu inak s tyn pracuje ako s menom
+			if [[ "$argument" = "list" ]] || [[ "$argument" = "list-currency" ]] || [[ "$argument" = "status" ]] || [[ "$argument" = "profit" ]] 
+			then 
+				#Kontrola ci nie je zadany prikaz znova
+				if [[ -z "$com" ]]
+				then
+					com="$argument"
+				else 
+					echo "You have entered more than 1 argument" >&2
+					exit 1
+				fi
+			#Ak nebolo zadane meno ulozi do premennej name
+			elif [[ -z "$name" ]]
+			then
+				name="$argument"
+			else 
+				echo "You have entered wrong arguments" >&2
+				exit 1
+			fi
+			;;
+	esac
+done
+
+if [ "$?" -eq 0 ]; then
+    exit 0
+fi
