@@ -1,6 +1,4 @@
-# IOS_Project_1
-
-# Skript na analýzu transakčných logov
+# IOS_Project_1 - Skript na analýzu transakčných logov
 
 Tento skript v jazyku Bash slúži na spracovanie a analýzu transakčných logov. Umožňuje filtrovať záznamy podľa používateľa, časového rozsahu a meny, a následne vykonať rôzne typy výpisov alebo sumarizácií.
 
